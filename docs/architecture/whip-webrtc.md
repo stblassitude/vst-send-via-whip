@@ -106,7 +106,8 @@ value for each session.
 | Bitrate or content changed | Re-create the encoder; the session stays up. |
 | *Send enabled* off | End the session (DELETE). |
 | *Send enabled* on | Connect. |
-| Plugin removed or project closed | End the session, join all threads. |
+| Plugin removed or project closed | End the session; wait up to 500 ms for the DELETE. |
+| Internal error (panic) in the worker | Log it, discard the session, reconnect. |
 
 ## Logging
 

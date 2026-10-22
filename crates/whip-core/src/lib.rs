@@ -8,6 +8,7 @@ mod drift;
 mod encoder;
 mod eventlog;
 mod feeder;
+mod pin;
 mod resample;
 mod settings;
 mod shared;

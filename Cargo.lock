@@ -3966,6 +3966,7 @@ name = "whip-core"
 version = "0.1.0"
 dependencies = [
  "if-addrs",
+ "libc",
  "log",
  "opus",
  "rtrb 0.4.0",
@@ -3973,6 +3974,7 @@ dependencies = [
  "serde",
  "str0m",
  "ureq",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

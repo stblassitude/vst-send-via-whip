@@ -64,16 +64,23 @@ at a previous event.
   at least every 5 ms.
 - **WHIP requests** run on short-lived threads with timeouts (POST 5 s,
   DELETE 2 s), so the worker keeps draining audio while HTTP is in flight.
-  The worker joins them at shutdown.
+  The DNS lookup that decides whether loopback addresses are used also runs
+  on a helper thread; the worker waits at most 1 s for it.
+- **Panics.** The worker loop runs under `catch_unwind`. A panic is logged,
+  the session and the audio pipeline are discarded, and the worker
+  reconnects as after any other failure.
 - **Shutdown.** Dropping the `Sender`:
     1. signals the worker to stop;
-    2. the worker ends the WHIP session (DELETE);
-    3. it joins all helper threads;
+    2. the worker ends the WHIP session (DELETE on a helper thread);
+    3. it waits up to 500 ms for helper threads, then leaves the rest
+       to finish or time out on their own;
     4. the `Sender` then joins the worker.
 
-    Every blocking call has a timeout, so closing a project finishes in
-    bounded time. Threads never outlive the plugin, which matters because
-    the plugin's code is unloaded with it.
+    The host's main thread waits at most about 1.5 s, even when the server
+    is unreachable or DNS hangs. Helper threads may outlive the plugin
+    instance, so the plugin binary is pinned in memory (`RTLD_NODELETE` or
+    `GET_MODULE_HANDLE_EX_FLAG_PIN`) when the first sender starts: the host
+    can't unload code that is still running.
 
 ## Shared state
 

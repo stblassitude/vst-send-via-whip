@@ -1,12 +1,17 @@
 //! The sender thread: drains audio from the ring buffer, encodes it, and runs
-//! the WHIP/WebRTC session. All blocking network calls are bounded by
-//! timeouts, so dropping a [`Sender`] always finishes in bounded time.
+//! the WHIP/WebRTC session. The worker itself never waits on the network:
+//! HTTP requests and name lookups run on helper threads, which are left to
+//! finish on their own at shutdown, so dropping a [`Sender`] is quick even
+//! when the server is unreachable. A panic in the worker ends the current
+//! session and the worker carries on.
 
+use std::any::Any;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, TryLockError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -30,6 +35,14 @@ const FRAME_DURATION: Duration = Duration::from_millis(20);
 const POST_TIMEOUT: Duration = Duration::from_secs(5);
 const DELETE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Name lookups only decide whether loopback addresses are used; a hanging
+/// DNS server must not stall the worker.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long shutdown waits for a final DELETE before leaving it behind.
+const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
+/// Datagrams handled per socket and tick, so a flood of incoming packets
+/// cannot starve the audio path.
+const MAX_DATAGRAMS: usize = 256;
 /// A live session that receives nothing (STUN consent checks, RTCP) from the
 /// server for this long is considered dead. ICE alone takes ~30 s to notice.
 const RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -64,7 +77,7 @@ impl Default for SenderOptions {
 }
 
 /// Owns the sender thread. Dropping it ends the WHIP session and joins the
-/// thread.
+/// thread, which takes at most about `RESOLVE_TIMEOUT + SHUTDOWN_GRACE`.
 pub struct Sender {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
@@ -77,6 +90,7 @@ impl Sender {
         consumer: Consumer<f32>,
         options: SenderOptions,
     ) -> std::io::Result<Sender> {
+        crate::pin::pin_module();
         shared.shutdown.store(false, Ordering::Relaxed);
         let worker_shared = shared.clone();
         let thread = thread::Builder::new()
@@ -235,39 +249,82 @@ impl Worker {
             "sender started, endpoint {}",
             display_endpoint(&self.settings)
         ));
-        while !self.shared.shutdown.load(Ordering::Relaxed) {
-            let now = Instant::now();
-            self.check_settings();
-            self.manage_connection(now);
-            self.pump_audio(now);
-            let next = match &mut self.conn {
-                Conn::Active(session) => match service(session, &mut self.status, &self.log, now) {
-                    Ok(next) => next,
-                    Err(e) => {
-                        self.fail(now, e);
-                        now + TICK
-                    }
-                },
-                _ => now + TICK,
-            };
-            self.background.retain(|t| !t.is_finished());
-            self.publish(now);
-            let wake = next.min(Instant::now() + TICK);
-            let sleep = wake.saturating_duration_since(Instant::now());
-            if !sleep.is_zero() {
-                thread::sleep(sleep);
+        while !self.shutting_down() {
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                while !self.shutting_down() {
+                    self.tick();
+                }
+            }));
+            if let Err(payload) = result {
+                self.recover(panic_message(&*payload));
             }
         }
         self.teardown("shutting down");
-        for t in self.background.drain(..) {
-            let _ = t.join();
+        // Give a final DELETE a moment to reach the server. Anything still
+        // running after that is left to finish or time out on its own.
+        let deadline = Instant::now() + SHUTDOWN_GRACE;
+        while self.background.iter().any(|t| !t.is_finished()) && Instant::now() < deadline {
+            thread::sleep(TICK);
         }
+        self.background.clear();
         self.log.info("sender stopped");
     }
 
+    fn shutting_down(&self) -> bool {
+        self.shared.shutdown.load(Ordering::Relaxed)
+    }
+
+    fn tick(&mut self) {
+        #[cfg(test)]
+        if self.shared.inject_panic.swap(false, Ordering::Relaxed) {
+            panic!("injected panic");
+        }
+        let now = Instant::now();
+        self.check_settings();
+        self.manage_connection(now);
+        self.pump_audio(now);
+        let next = match &mut self.conn {
+            Conn::Active(session) => match service(session, &mut self.status, &self.log, now) {
+                Ok(next) => next,
+                Err(e) => {
+                    self.fail(now, e);
+                    now + TICK
+                }
+            },
+            _ => now + TICK,
+        };
+        self.background.retain(|t| !t.is_finished());
+        self.publish(now);
+        let wake = next.min(Instant::now() + TICK);
+        let sleep = wake.saturating_duration_since(Instant::now());
+        if !sleep.is_zero() {
+            thread::sleep(sleep);
+        }
+    }
+
+    /// Resets everything a panic may have left half-done and schedules a
+    /// new connection, as for any other failure.
+    fn recover(&mut self, msg: &str) {
+        self.log.warn(format_args!("internal error: {msg}"));
+        self.pipeline = None;
+        self.packets.clear();
+        self.drift = None;
+        self.stalled = true;
+        let now = Instant::now();
+        self.fail(now, format!("internal error: {msg}"));
+        // Don't spin if the panic recurs on every tick.
+        let until = now + BACKOFF_MIN;
+        while Instant::now() < until && !self.shutting_down() {
+            thread::sleep(TICK);
+        }
+    }
+
     fn check_settings(&mut self) {
-        let Ok(current) = self.settings_src.try_read() else {
-            return;
+        let current = match self.settings_src.try_read() {
+            Ok(current) => current,
+            // The settings stay valid if a writer panicked.
+            Err(TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(TryLockError::WouldBlock) => return,
         };
         if *current == self.settings {
             return;
@@ -726,7 +783,7 @@ fn service(
         let Ok(local) = socket.local_addr() else {
             continue;
         };
-        loop {
+        for _ in 0..MAX_DATAGRAMS {
             match socket.recv_from(&mut buf) {
                 Ok((n, source)) => {
                     let Ok(contents) = (&buf[..n]).try_into() else {
@@ -913,10 +970,33 @@ fn endpoint_addrs(endpoint: &str) -> Vec<IpAddr> {
     } else {
         authority.to_string()
     };
-    host_port
-        .to_socket_addrs()
-        .map(|it| it.map(|a| a.ip()).collect())
-        .unwrap_or_default()
+    if let Ok(addr) = host_port.parse::<SocketAddr>() {
+        return vec![addr.ip()];
+    }
+    // A lookup that outlives the timeout finishes on its own; an endpoint
+    // that cannot be resolved quickly is treated as remote.
+    let (tx, rx) = mpsc::channel();
+    let spawned = thread::Builder::new()
+        .name("whip-resolve".into())
+        .spawn(move || {
+            let addrs: Vec<IpAddr> = host_port
+                .to_socket_addrs()
+                .map(|it| it.map(|a| a.ip()).collect())
+                .unwrap_or_default();
+            let _ = tx.send(addrs);
+        });
+    if spawned.is_err() {
+        return Vec::new();
+    }
+    rx.recv_timeout(RESOLVE_TIMEOUT).unwrap_or_default()
+}
+
+fn panic_message(payload: &(dyn Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("panic")
 }
 
 fn display_endpoint(settings: &StreamSettings) -> String {
@@ -965,6 +1045,66 @@ mod tests {
             vec!["::1".parse::<IpAddr>().unwrap()]
         );
         assert!(endpoint_addrs("garbage").is_empty());
+        let local = endpoint_addrs("http://localhost:8444/group/a/.whip");
+        assert!(!local.is_empty() && local.iter().all(IpAddr::is_loopback));
+    }
+
+    fn spawn_test_sender(settings: StreamSettings) -> (Sender, Arc<Shared>) {
+        let shared = Shared::new();
+        let (_feeder, consumer) = crate::audio_channel(shared.clone());
+        let options = SenderOptions {
+            metrics_interval: Duration::from_secs(3600),
+            log_to_file: false,
+        };
+        let settings = Arc::new(RwLock::new(settings));
+        let sender = Sender::spawn(settings, shared.clone(), consumer, options).unwrap();
+        (sender, shared)
+    }
+
+    fn wait_for(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if cond() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        cond()
+    }
+
+    #[test]
+    fn worker_survives_panics() {
+        let (sender, shared) = spawn_test_sender(StreamSettings::default());
+        for n in 1..=2 {
+            shared.inject_panic.store(true, Ordering::Relaxed);
+            assert!(wait_for(Duration::from_secs(5), || shared
+                .status()
+                .reconnects
+                == n));
+        }
+        // Still running: the next ticks report the actual state again.
+        assert!(wait_for(Duration::from_secs(5), || {
+            shared.status().state == ConnState::Unconfigured
+        }));
+        drop(sender);
+    }
+
+    #[test]
+    fn shutdown_does_not_wait_for_a_hanging_server() {
+        // Connections complete in the backlog, but nothing is ever answered.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let settings = StreamSettings {
+            endpoint: format!("http://{}/group/a/.whip", listener.local_addr().unwrap()),
+            ..Default::default()
+        };
+        let (sender, shared) = spawn_test_sender(settings);
+        assert!(wait_for(Duration::from_secs(5), || {
+            shared.status().state == ConnState::Connecting
+        }));
+        let start = Instant::now();
+        drop(sender);
+        let took = start.elapsed();
+        assert!(took < Duration::from_secs(2), "shutdown took {took:?}");
     }
 
     #[test]

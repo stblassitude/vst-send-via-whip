@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::settings::ChannelMode;
@@ -16,6 +16,8 @@ pub struct Shared {
     pub(crate) shutdown: AtomicBool,
     pub(crate) reconnect: AtomicBool,
     pub(crate) input: InputCounters,
+    #[cfg(test)]
+    pub(crate) inject_panic: AtomicBool,
     status: Mutex<Status>,
 }
 
@@ -29,6 +31,8 @@ impl Shared {
             shutdown: AtomicBool::new(false),
             reconnect: AtomicBool::new(false),
             input: InputCounters::default(),
+            #[cfg(test)]
+            inject_panic: AtomicBool::new(false),
             status: Mutex::new(Status::default()),
         })
     }
@@ -72,13 +76,18 @@ impl Shared {
     }
 
     pub fn status(&self) -> Status {
-        self.status.lock().map(|s| s.clone()).unwrap_or_default()
+        self.status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub(crate) fn publish_status(&self, status: &Status) {
-        if let Ok(mut s) = self.status.lock() {
-            s.clone_from(status);
-        }
+        // A snapshot is always complete, so a poisoned lock is harmless.
+        self.status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone_from(status);
     }
 }
 
