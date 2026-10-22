@@ -27,9 +27,28 @@ mod imp {
             if libc::dladdr(addr, &mut info) == 0 || info.dli_fname.is_null() {
                 return false;
             }
+            if in_main_program(&info) {
+                return true;
+            }
             let flags = libc::RTLD_NOW | libc::RTLD_NOLOAD | libc::RTLD_NODELETE;
             !libc::dlopen(info.dli_fname, flags).is_null()
         }
+    }
+
+    /// The main program is never unloaded, e.g. in the CLI. glibc reports
+    /// it by the name it was started as, which dlopen cannot find again,
+    /// so it is recognised by its base address instead.
+    #[cfg(target_os = "linux")]
+    unsafe fn in_main_program(info: &libc::Dl_info) -> bool {
+        // The program headers lie inside the main program's image.
+        let phdr = libc::getauxval(libc::AT_PHDR) as *const libc::c_void;
+        let mut main: libc::Dl_info = std::mem::zeroed();
+        !phdr.is_null() && libc::dladdr(phdr, &mut main) != 0 && main.dli_fbase == info.dli_fbase
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    unsafe fn in_main_program(_info: &libc::Dl_info) -> bool {
+        false
     }
 }
 
