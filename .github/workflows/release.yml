@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      matrix:
+        include:
+          - { platform: linux-x64, os: ubuntu-22.04 }
+          - { platform: macos-universal, os: macos-latest }
+          - { platform: windows-x64, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version from tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not of the form vMAJOR.MINOR.PATCH[-PRERELEASE]"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # The plugins report the crate version as their VST3/CLAP version.
+      - name: Set version
+        run: scripts/set-version.sh "$VERSION"
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl-dev libjack-dev libx11-xcb-dev \
+            libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.platform }}
+
+      - name: Build
+        run: |
+          if [[ $RUNNER_OS == macOS ]]; then
+            export MACOSX_DEPLOYMENT_TARGET=11.0
+            cargo xtask bundle-universal whip-send-plugin --release
+            for t in aarch64-apple-darwin x86_64-apple-darwin; do
+              cargo build --release -p whip-send-cli --target $t
+            done
+            lipo -create -output target/release/whip-send-cli \
+              target/aarch64-apple-darwin/release/whip-send-cli \
+              target/x86_64-apple-darwin/release/whip-send-cli
+          else
+            cargo xtask bundle whip-send-plugin --release
+            cargo build --release -p whip-send-cli
+          fi
+
+      # nih-plug's bundler writes a fixed 1.0.0 into Info.plist.
+      - name: Set macOS bundle versions
+        if: runner.os == 'macOS'
+        run: |
+          for bundle in "target/bundled/WHIP Send.vst3" "target/bundled/WHIP Send.clap"; do
+            /usr/libexec/PlistBuddy \
+              -c "Set :CFBundleShortVersionString $VERSION" \
+              -c "Set :CFBundleVersion $VERSION" \
+              -c "Set :CFBundleIdentifier de.lassitu.whip-send" \
+              "$bundle/Contents/Info.plist"
+            codesign --force --deep --sign - "$bundle"
+          done
+
+      - name: Package
+        run: |
+          name="whip-send-$VERSION-${{ matrix.platform }}"
+          mkdir -p "dist/$name"
+          cp -R target/bundled/* "dist/$name/"
+          exe=""
+          [[ $RUNNER_OS == Windows ]] && exe=".exe"
+          cp "target/release/whip-send-cli$exe" README.md LICENSE "dist/$name/"
+          cd dist
+          if [[ $RUNNER_OS == Windows ]]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            zip -qry "$name.zip" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Write release notes
+        run: |
+          tag=$GITHUB_REF_NAME
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)
+          {
+            if [[ -n $prev ]]; then
+              echo "## Changes since $prev"
+              echo
+              git log --no-merges --reverse --format='- %s (%h)' "$prev..$tag"
+              echo
+              echo "**Full changelog:** $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$prev...$tag"
+            else
+              echo "## Changes"
+              echo
+              git log --no-merges --reverse --format='- %s (%h)' "$tag"
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=()
+          [[ $version == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" artifacts/*.zip \
+            --verify-tag \
+            --title "WHIP Send $version" \
+            --notes-file notes.md \
+            "${prerelease[@]}"

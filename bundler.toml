@@ -1,0 +1,3 @@
+# Bundle names used by `cargo xtask bundle`.
+[whip-send-plugin]
+name = "WHIP Send"

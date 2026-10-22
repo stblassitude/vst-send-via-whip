@@ -1,0 +1,17 @@
+[package]
+name = "whip-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+log.workspace = true
+rtrb.workspace = true
+serde.workspace = true
+str0m = { version = "0.24", default-features = false, features = ["rust-crypto"] }
+opus = "0.4"
+rubato = "5"
+ureq = "3"
+if-addrs = "0.13"

@@ -1,0 +1,22 @@
+[package]
+name = "whip-send-plugin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "whip-send-standalone"
+path = "src/main.rs"
+
+[dependencies]
+whip-core = { path = "../whip-core" }
+log.workspace = true
+rtrb.workspace = true
+serde.workspace = true
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["standalone"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }

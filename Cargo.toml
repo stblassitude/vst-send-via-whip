@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/whip-core", "crates/whip-send-cli", "crates/whip-send-plugin", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Stefan Bethke <stb@lassitu.de>"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/stblassitude/vst-send-via-whip"
+
+[workspace.dependencies]
+log = "0.4"
+rtrb = "0.4"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
