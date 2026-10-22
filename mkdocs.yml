@@ -1,0 +1,68 @@
+site_name: WHIP Send
+site_description: A VST3/CLAP plugin that publishes audio to WHIP endpoints such as Galène
+site_url: https://stblassitude.github.io/vst-send-via-whip/
+repo_url: https://github.com/stblassitude/vst-send-via-whip
+repo_name: stblassitude/vst-send-via-whip
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Stefan Bethke &mdash; GPL-3.0-or-later
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.tabs.link
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Usage:
+      - Installation: usage/installation.md
+      - Configuration: usage/configuration.md
+      - Live operation and tips: usage/live-operation.md
+      - Monitoring and troubleshooting: usage/troubleshooting.md
+  - Development:
+      - Building: development/building.md
+      - Testing: development/testing.md
+      - CI and releases: development/releasing.md
+  - Architecture:
+      - Overview: architecture/index.md
+      - Technology choices: architecture/technology.md
+      - Audio path and clocking: architecture/audio-path.md
+      - WHIP and WebRTC: architecture/whip-webrtc.md
+      - Original proposal: architecture/proposal.md
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn

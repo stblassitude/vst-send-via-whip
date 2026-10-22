@@ -1,11 +1,16 @@
 # Proposal: "WHIP Send" audio plugin for Reaper
 
+!!! info "Historical document"
+    This is the design proposal written before implementation, kept for
+    reference. Some details changed during implementation; the other
+    [architecture pages](index.md) describe the plugin as built.
+
 A plugin that sits on a Reaper track (or bus), passes the audio through
 unchanged, and publishes a copy of it to a WHIP endpoint such as a Galene group.
 For our use case, three instances on three tracks publish to three Galene
 groups.
 
-This expands Option 1 of [solution-suggestions.md](solution-suggestions.md).
+This expands Option 1 of the earlier solution suggestions (see [Technology choices](technology.md#approaches-considered)).
 
 ## Requirements
 
