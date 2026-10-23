@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --release --"
+
+# Link the C runtime statically, so the plugin doesn't need the Visual C++
+# Redistributable (VCRUNTIME140.dll). Hosts skip plugins that fail to load.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
