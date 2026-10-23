@@ -27,7 +27,8 @@ The first two feed Reaper live inputs, like a real show: audio keeps flowing
 whether or not the transport runs. The third is simpler but stops sending
 audio whenever the transport stops.
 
-`play.sh` is for macOS, `play.ps1` for Windows. `play.ps1` hasn't been tested yet.
+`play.sh` is for macOS, `play.ps1` for Windows. The Windows setup has been
+tested with the 16-channel VB-CABLE, in a virtual machine.
 
 ## Requirements
 
@@ -98,25 +99,49 @@ You need:
 
 - [VB-CABLE](https://vb-audio.com/Cable/) by VB-Audio (free). It installs one
   virtual device with two ends: *CABLE Input* for playback and *CABLE Output*
-  for recording.
+  for recording. Its 16-channel version calls the playback end *CABLE In
+  16 Ch*.
 - [mpv](https://mpv.io/installation/), e.g. `winget install shinchiro.mpv`
   or `scoop install mpv`.
+
+If Windows runs in a virtual machine without 3D acceleration, Reaper crashes
+when you add WHIP Send, because its editor needs OpenGL 3.2. Install Mesa's
+software OpenGL first, as described in
+[Host crashes when adding the plugin](../docs/usage/troubleshooting.md#host-crashes-when-adding-the-plugin).
 
 ### Set up VB-CABLE
 
 Use one cable with at least 6 channels, not several stereo cables. Reaper can
-open only one input device at a time.
+open only one input device at a time. These steps were tested with the
+16-channel version, whose playback end is called *CABLE In 16 Ch*.
 
-1. In the Windows sound control panel (*Sound → Playback*), open the
-   properties of *CABLE Input*. On the *Advanced* tab, choose a format with
-   **48000 Hz**. Do the same for *CABLE Output* on the *Recording* tab.
-2. Note the channel count the format shows, e.g. *16 channel, 24 bit,
-   48000 Hz*:
-    - **16 channels:** nothing else to set up. *Configure* is greyed out,
-      because Windows has no speaker layout for 16 channels. The channels
-      are passed through as they are.
-    - **8 channels or fewer:** select *CABLE Input*, click *Configure* and
-      choose **7.1 Surround**, so the cable carries 8 channels.
+1. In the Windows sound control panel, open the properties of the playback
+   end (*Sound → Playback → CABLE In 16 Ch*, or *CABLE Input*). On the
+   *Advanced* tab, choose a format with **16 channels** (or 8, see below)
+   and **48000 Hz**.
+2. Do the same for *CABLE Output* on the *Recording* tab. **This is the one
+   that matters for Reaper:** in shared mode, Reaper gets exactly as many
+   inputs as this format has. The default is 2 channels, even on the
+   16-channel cable.
+3. Check the result in PowerShell. Both ends should show the channel count
+   you chose:
+
+    ```powershell
+    Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture','HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render' |
+      ForEach-Object {
+        $p = Get-ItemProperty "$($_.PSPath)\Properties" -ErrorAction SilentlyContinue
+        $name = $p.'{a45c254e-df1c-4efd-8020-67d146a850e0},2'
+        $fmt = $p.'{f19f064d-082c-4e27-bc73-6882a1bb8e4c},0'
+        if ($name -like '*CABLE*' -and $fmt) {
+          "{0,-16} {1} ch, {2} Hz" -f $name, [BitConverter]::ToUInt16($fmt, 10), [BitConverter]::ToUInt32($fmt, 12)
+        }
+      }
+    ```
+
+*Configure* (the speaker setup) is greyed out for 16 channels, because
+Windows has no speaker layout for them. That's fine. With a cable of
+8 channels or fewer, click *Configure* on the playback end and choose
+**7.1 Surround**, and use `-Channels 8` below.
 
 ### Start playback
 
@@ -126,11 +151,11 @@ In PowerShell, list the audio devices:
 live-test\play.ps1
 ```
 
-Then start playback on the cable. The device can be its ID or part of its
-name:
+Then start playback on the cable's playback end. The device can be its ID or
+part of its name:
 
 ```powershell
-live-test\play.ps1 'CABLE Input'
+live-test\play.ps1 'CABLE In'
 ```
 
 For an 8-channel cable, add `-Channels 8`. To play another file, add
@@ -138,26 +163,31 @@ For an 8-channel cable, add `-Channels 8`. To play another file, add
 
 The script finds `mpv.com` on the PATH or in winget's package folder. It puts
 the three tracks unchanged on the first six channels of the cable, and leaves
-the rest silent. The channel count must match the cable's, otherwise Windows
-converts the audio and may move or mix channels. If mpv stops, the script
-restarts it after two seconds. Press **q** or **Ctrl-C** to quit.
+the rest silent. If mpv stops, the script restarts it after two seconds.
+Press **q** or **Ctrl-C** to quit.
+
+The script opens the cable in **WASAPI exclusive mode**, bypassing the
+Windows mixer. The 16-channel cable's shared format has no speaker positions,
+which mpv can't handle, so shared mode fails with *Unable to construct
+channel map*. In exclusive mode, mpv passes its own 16-channel layout
+straight to the driver. Only the playback end is used exclusively, so Reaper
+can still record from *CABLE Output* in shared mode. Add `-Shared` to play
+through the Windows mixer instead, e.g. with another cable.
+
+**Watch mpv's output when it starts.** If it says *Could not open/initialize
+audio device*, mpv keeps running but plays nothing, and the script doesn't
+notice. Quit, fix the device, and start again.
 
 > **Note:** If PowerShell refuses to run the script because running scripts
 > is disabled, allow it once with
-> `powershell -ExecutionPolicy Bypass -File live-test\play.ps1 'CABLE Input'`,
+> `powershell -ExecutionPolicy Bypass -File live-test\play.ps1 'CABLE In'`,
 > or for good with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-**Check the channel mapping once.** Play one track at a time and check in
-Reaper that only the expected inputs move. For example, this plays only the
-second track, which should arrive on inputs 3/4. Use the device ID from the
-list, `mpv` from the PATH or the full path to `mpv.com`, and for an 8-channel
-cable `--audio-channels=7.1` and `pan=7.1`:
+**Check the channel mapping once.** Play one track at a time with `-Track`
+and check in Reaper that only the expected inputs move:
 
 ```powershell
-mpv --no-video --audio-device='wasapi/{0.0.0.00000000}.{…}' `
-    --audio-channels=16 --audio-samplerate=48000 `
-    --lavfi-complex='[aid2]pan=16c|c2=c0|c3=c1[ao]' `
-    live-test\live-test.mp4
+live-test\play.ps1 'CABLE In' -Track 2    # should arrive on inputs 3/4 only
 ```
 
 This matters most for an 8-channel cable: channel 4 is the LFE channel of the
@@ -171,8 +201,13 @@ Continue with [Configure Reaper](#configure-reaper), choosing *WASAPI* and
 1. **Audio device:** *Preferences → Audio → Device*. Set the input device and
    the sample rate to **48000** Hz:
     - **macOS:** *CoreAudio*, input device: the Loopback device (*live-test*);
-    - **Windows:** *WASAPI*, input device: *CABLE Output (VB-Audio Virtual
-      Cable)*.
+    - **Windows:** *WASAPI* in **Shared** mode, input device: *CABLE Output
+      (VB-Audio Virtual Cable)*. The status at the top right should show
+      16 inputs, e.g. `16/2ch`. If it shows 2, set *CABLE Output*'s format
+      as described in [Set up VB-CABLE](#set-up-vb-cable), then restart
+      Reaper. If Reaper shows *audio device closed*, set the output device
+      to 48000 Hz as well, and turn off *Close audio device when stopped
+      and application is inactive* under *Preferences → Audio*.
 
     The output device doesn't matter. Use your speakers or headphones if you
     want to listen.

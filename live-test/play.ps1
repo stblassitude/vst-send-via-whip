@@ -3,10 +3,11 @@
 # production feed for Reaper. Track 1 goes to channels 1/2, track 2 to 3/4,
 # track 3 to 5/6. Uses mpv, see README.md.
 #
-# usage: live-test\play.ps1 [-Device] DEVICE [-Channels 16|8] [-File FILE]
+# usage: live-test\play.ps1 [-Device] DEVICE [-Channels 16|8] [-Shared]
+#                           [-Track 1|2|3] [-File FILE]
 #
 # DEVICE is an mpv device ID (wasapi/{...}) or part of a device name, such as
-# "CABLE Input". Without DEVICE, lists the audio devices.
+# "CABLE In". Without DEVICE, lists the audio devices.
 
 param(
     [Parameter(Position = 0)]
@@ -14,6 +15,13 @@ param(
     # The cable's channel count: 16, or 8 for a cable set to 7.1.
     [ValidateSet(16, 8)]
     [int]$Channels = 16,
+    # Play through the Windows mixer instead of opening the device in WASAPI
+    # exclusive mode. Doesn't work with the 16-channel VB-CABLE, whose shared
+    # format has no speaker positions.
+    [switch]$Shared,
+    # Play only this track, on its usual channels, to check the mapping.
+    [ValidateSet(0, 1, 2, 3)]
+    [int]$Track = 0,
     [string]$File = $(if ($env:LIVE_TEST_FILE) { $env:LIVE_TEST_FILE } else { Join-Path $PSScriptRoot 'live-test.mp4' })
 )
 
@@ -69,18 +77,36 @@ if (-not (Test-Path $File)) {
 
 # Put the six channels unchanged on the first six of the cable, leaving the
 # rest silent. The layout must match the cable's channel count, or Windows
-# converts the audio and may move or mix channels.
-$layout = if ($Channels -eq 16) { '16' } else { '7.1' }
-$pan = if ($Channels -eq 16) { '16c' } else { '7.1' }
-$graph = "[aid1][aid2][aid3]amerge=inputs=3,pan=$pan|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5[ao]"
+# converts the audio and may move or mix channels. A 16-channel VB-CABLE
+# reports no speaker positions, which mpv can't map, so name the first 16
+# positions Windows knows (channel mask 0xFFFF). mpv and ffmpeg spell them
+# differently.
+if ($Channels -eq 16) {
+    $layout = 'fl-fr-fc-lfe-bl-br-flc-frc-bc-sl-sr-tc-tfl-tfc-tfr-tbl'
+    $pan = 'FL+FR+FC+LFE+BL+BR+FLC+FRC+BC+SL+SR+TC+TFL+TFC+TFR+TBL'
+} else {
+    $layout = '7.1'
+    $pan = '7.1'
+}
+if ($Track -eq 0) {
+    $graph = "[aid1][aid2][aid3]amerge=inputs=3,pan=$pan|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5[ao]"
+    $what = 'all tracks'
+} else {
+    $left = 2 * ($Track - 1)
+    $graph = "[aid$Track]pan=$pan|c$left=c0|c$($left + 1)=c1[ao]"
+    $what = "track $Track only, on channels $($left + 1)/$($left + 2)"
+}
+$mode = if ($Shared) { 'shared' } else { 'exclusive' }
 
-Write-Host "Playing $File to $($target.Name), $Channels channels. Press q or Ctrl-C to quit."
+Write-Host "Playing $what of $File to $($target.Name), $Channels channels, $mode mode."
+Write-Host "Press q or Ctrl-C to quit. If mpv says 'Could not open/initialize audio device', it plays nothing."
 
 # --loop-file loops the file; the outer loop restarts mpv if it fails, for
 # example when the device goes away for a moment.
 while ($true) {
     & $mpv --no-video --loop-file=inf "--audio-device=$($target.Id)" `
         "--audio-channels=$layout" --audio-samplerate=48000 `
+        "--audio-exclusive=$(if ($Shared) { 'no' } else { 'yes' })" `
         "--lavfi-complex=$graph" $File
     # 0: quit with q; 4: quit by Ctrl-C or a signal.
     if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 4) { break }
