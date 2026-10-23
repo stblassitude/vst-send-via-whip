@@ -47,9 +47,13 @@ The settings fields:
 | Field | Meaning |
 |---|---|
 | **Endpoint** | The WHIP endpoint URL, `http://` or `https://`. |
-| **Token** | The bearer token. It is masked; tick *show* to check it. |
+| **Token** | The bearer token. It is masked; tick *show* to check it. You can also paste a whole Galène invite link; the plugin keeps only its `token=` part. |
 | **Bitrate** | Opus bitrate, 16–256 kbit/s. Default 64. |
 | **Content** | *Voice* tunes Opus for speech, *Music* for music. |
+
+The **Paste** button next to Endpoint and Token replaces the field with the
+clipboard. Use it where the host keeps keystrokes from reaching the plugin,
+like Reaper on macOS (see [Gotchas](live-operation.md#gotchas)).
 
 Changes to these fields only take effect when you click **Apply**, so typing
 doesn't cause reconnects. **Revert** discards your edits. **Reconnect** drops

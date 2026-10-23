@@ -20,3 +20,5 @@ rtrb.workspace = true
 serde.workspace = true
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["standalone"] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+# The same version egui-baseview uses.
+copypasta = "0.10"

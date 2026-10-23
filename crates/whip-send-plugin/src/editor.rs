@@ -18,6 +18,31 @@ struct EditorState {
     /// The settings last seen in the shared state.
     applied: StreamSettings,
     show_token: bool,
+    /// Why the last paste failed, shown until the next one.
+    paste_error: Option<String>,
+}
+
+/// Reads text from the system clipboard. Hosts like Reaper on macOS keep
+/// keystrokes, including Cmd-V, from reaching the text fields, so the editor
+/// offers buttons that paste directly.
+fn clipboard_text() -> Result<String, String> {
+    use copypasta::ClipboardProvider;
+    let mut ctx = copypasta::ClipboardContext::new().map_err(|e| e.to_string())?;
+    let text = ctx.get_contents().map_err(|e| e.to_string())?;
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("clipboard is empty".into());
+    }
+    Ok(text.to_string())
+}
+
+/// Accepts either a bare token or a Galène invite link, and returns the
+/// token from the link's `token=` parameter.
+fn token_from(text: &str) -> String {
+    match text.split_once("token=") {
+        Some((_, rest)) => rest.split(['&', '#']).next().unwrap_or("").to_string(),
+        None => text.to_string(),
+    }
 }
 
 pub(crate) fn create(params: Arc<WhipSendParams>, shared: Arc<Shared>) -> Option<Box<dyn Editor>> {
@@ -28,6 +53,7 @@ pub(crate) fn create(params: Arc<WhipSendParams>, shared: Arc<Shared>) -> Option
         draft: current.clone(),
         applied: current,
         show_token: false,
+        paste_error: None,
     };
     create_egui_editor(
         params.editor_state.clone(),
@@ -66,15 +92,43 @@ fn draw(ui: &mut egui::Ui, setter: &ParamSetter, st: &mut EditorState) {
             .spacing([8.0, 6.0])
             .show(ui, |ui| {
                 ui.label("Endpoint");
-                ui.add(
-                    egui::TextEdit::singleline(&mut st.draft.endpoint)
-                        .hint_text("https://host/group/name/.whip")
-                        .desired_width(f32::INFINITY),
-                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Paste")
+                        .on_hover_text("Replace with the clipboard")
+                        .clicked()
+                    {
+                        match clipboard_text() {
+                            Ok(text) => {
+                                st.draft.endpoint = text;
+                                st.paste_error = None;
+                            }
+                            Err(e) => st.paste_error = Some(e),
+                        }
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut st.draft.endpoint)
+                            .hint_text("https://host/group/name/.whip")
+                            .desired_width(f32::INFINITY),
+                    );
+                });
                 ui.end_row();
 
                 ui.label("Token");
                 ui.horizontal(|ui| {
+                    if ui
+                        .button("Paste")
+                        .on_hover_text("Replace with the clipboard (a token or an invite link)")
+                        .clicked()
+                    {
+                        match clipboard_text() {
+                            Ok(text) => {
+                                st.draft.token = token_from(&text);
+                                st.paste_error = None;
+                            }
+                            Err(e) => st.paste_error = Some(e),
+                        }
+                    }
                     ui.add(
                         egui::TextEdit::singleline(&mut st.draft.token)
                             .password(!st.show_token)
@@ -83,6 +137,16 @@ fn draw(ui: &mut egui::Ui, setter: &ParamSetter, st: &mut EditorState) {
                     ui.checkbox(&mut st.show_token, "show");
                 });
                 ui.end_row();
+
+                if let Some(e) = &st.paste_error {
+                    ui.label("");
+                    ui.label(
+                        RichText::new(format!("Paste failed: {e}"))
+                            .small()
+                            .color(Color32::from_rgb(0xd0, 0x40, 0x30)),
+                    );
+                    ui.end_row();
+                }
 
                 ui.label("Bitrate");
                 let mut kbps = st.draft.bitrate / 1000;
@@ -307,5 +371,27 @@ fn format_duration(d: Duration) -> String {
         format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
     } else {
         format!("{}:{:02}", s / 60, s % 60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::token_from;
+
+    #[test]
+    fn bare_token() {
+        assert_eq!(token_from("abc123"), "abc123");
+    }
+
+    #[test]
+    fn invite_link() {
+        assert_eq!(
+            token_from("https://galene.example.org:8443/group/voc-a/?token=abc123"),
+            "abc123"
+        );
+        assert_eq!(
+            token_from("https://galene.example.org/group/voc-a/?token=abc123&x=1#y"),
+            "abc123"
+        );
     }
 }

@@ -76,6 +76,13 @@ a loopback device, or an aggregate of two interfaces.
 
 ## Gotchas
 
+- **Typing doesn't reach the text fields in Reaper on macOS.** Reaper treats
+  keystrokes, including Cmd-V, as its own shortcuts, because the plugin's
+  fields aren't native controls. Copy the endpoint or token elsewhere and
+  click **Paste** next to the field. To type instead, turn on *Send all
+  keyboard input to plug-in* for that instance (right-click it in the FX
+  chain). Reaper's shortcuts, the space bar among them, then don't work while
+  the plugin window has focus.
 - **Typing in the endpoint or token field changes nothing** until you click
   **Apply**. *unsaved changes* next to the buttons means there are edits
   pending.
