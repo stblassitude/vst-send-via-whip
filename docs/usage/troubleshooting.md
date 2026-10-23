@@ -73,3 +73,48 @@ metrics state=live rate=48000 ch=1 block=128 cb_ms(n=22499 min=0.00 avg=2.67 max
 | `connection lost (nothing received from the server for 5 s)` | The server went away or the network dropped. The plugin reconnects by itself. |
 | `no input for 200 ms, sending silence` | Reaper stopped processing the track (transport stopped, monitoring off). |
 | Peak meter shows *silence* while audio plays | Wrong channel mode (e.g. *Mono (right)* on a signal that is only on the left), or *Send gain* set very low. |
+| The host crashes when you add the plugin or open its editor | No OpenGL 3.2, typically in a virtual machine. See below. |
+| Reaper on macOS ignores typing in the endpoint and token fields | Use the **Paste** buttons. See [Gotchas](live-operation.md#gotchas). |
+
+## Host crashes when adding the plugin
+
+The editor needs OpenGL 3.2 or later. If the system doesn't offer it, the
+editor fails while opening, and that takes the whole host down. On Windows,
+Reaper shows *Microsoft Visual C++ Runtime Library: Runtime Error!* first,
+and the Windows event log records an `APPCRASH` of `reaper.exe` with
+exception code `40000015`.
+
+This happens on computers without a working graphics driver, most often
+virtual machines without 3D acceleration (Device Manager shows e.g.
+*Microsoft Basic Display Adapter*, *Red Hat QXL* or *VirtIO GPU*). Windows
+itself then only offers OpenGL 1.1.
+
+**Fix on Windows:** install [Mesa for Windows](https://github.com/pal1000/mesa-dist-win/releases),
+which provides OpenGL 4.5 in software. Download the `release-msvc` archive
+and unpack it. Then either:
+
+- **System-wide** (simplest, for a VM): run `systemwidedeploy.cmd` as
+  administrator and choose the core desktop OpenGL drivers. Running the
+  script again offers to uninstall.
+- **For Reaper only:** copy `opengl32.dll`, `libgallium_wgl.dll` and, if
+  present, `libglapi.dll` from the archive's `x64` folder into Reaper's
+  folder, e.g. `C:\Program Files\REAPER (x64)`. Delete them to undo.
+
+Restart Reaper afterwards. The editor is then drawn by the CPU, which is fine
+for its simple interface. Don't install Mesa system-wide on a computer with a
+real graphics card; fix its graphics driver instead.
+
+### Finding the cause of other crashes
+
+The plugin framework writes panics to a file if the `NIH_LOG` environment
+variable names one. Start the host with it set, reproduce the crash, and
+read the file. In PowerShell:
+
+```powershell
+$env:NIH_LOG = "$env:LOCALAPPDATA\WhipSend\logs\nih.log"
+& "C:\Program Files\REAPER (x64)\reaper.exe"
+```
+
+On macOS and Linux, start the host from a terminal with `NIH_LOG=/tmp/nih.log`.
+If `whip-send.log` has a `sender started` line, the plugin itself started and
+the crash came later, e.g. when the editor opened.
