@@ -64,7 +64,11 @@ pub(crate) fn create(params: Arc<WhipSendParams>, shared: Arc<Shared>) -> Option
             ResizableWindow::new("whip-send")
                 .min_size(egui::Vec2::new(400.0, 480.0))
                 .show(ctx, egui_state.as_ref(), |ui| {
-                    draw(ui, setter, state);
+                    // The window lays content out edge to edge, ignoring the
+                    // panel's own margin.
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin::same(12))
+                        .show(ui, |ui| draw(ui, setter, state));
                 });
             ctx.request_repaint_after(Duration::from_millis(250));
         },
