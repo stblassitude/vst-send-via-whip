@@ -4187,9 +4187,11 @@ dependencies = [
  "opus",
  "rtrb 0.4.0",
  "rubato",
+ "rustls",
  "serde",
  "str0m",
  "ureq",
+ "webpki-roots",
  "windows-sys 0.59.0",
 ]
 

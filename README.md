@@ -64,6 +64,12 @@ and [Testing](https://stblassitude.github.io/vst-send-via-whip/development/testi
 Releases are built by GitHub Actions when a `vX.Y.Z` tag is pushed. The tag
 sets the plugin version.
 
+> **Note:** ureq's own TLS connector sends no ALPN, which some WHIP servers
+> require. [`tls.rs`](crates/whip-core/src/tls.rs) therefore supplies one
+> that offers `http/1.1`, built on ureq's `unversioned::transport` API. That
+> API may change in minor ureq releases, so check this file first if a ureq
+> update breaks the build.
+
 ## License
 
 Copyright © 2026 Stefan Bethke. Licensed under the GNU General Public License,

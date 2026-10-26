@@ -45,11 +45,12 @@ impl fmt::Display for WhipError {
 }
 
 fn agent(timeout: Duration) -> Agent {
-    Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .http_status_as_error(false)
-        .build()
-        .into()
+    crate::tls::agent(
+        Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .build(),
+    )
 }
 
 fn bearer(token: &str) -> Option<String> {

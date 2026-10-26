@@ -12,6 +12,7 @@ mod pin;
 mod resample;
 mod settings;
 mod shared;
+mod tls;
 mod url;
 mod whip;
 mod worker;
