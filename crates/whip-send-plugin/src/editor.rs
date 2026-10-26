@@ -219,7 +219,7 @@ fn draw(ui: &mut egui::Ui, setter: &ParamSetter, st: &mut EditorState) {
                 }
                 ui.end_row();
 
-                ui.label("Gain");
+                Fader::label(ui, "Gain");
                 ui.add(Fader::new(&p.gain, setter));
                 ui.end_row();
 

@@ -25,6 +25,21 @@ impl<'a> Fader<'a> {
         Self { param, setter }
     }
 
+    /// A label for the fader's grid row, level with the groove. A plain
+    /// label would be centered on the row, which includes the scale.
+    pub(crate) fn label(ui: &mut Ui, text: &str) {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+            let galley = ui.painter().layout_no_wrap(
+                text.to_string(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                ui.visuals().text_color(),
+            );
+            let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x, CAP.y), Sense::hover());
+            let pos = rect.left_center() - vec2(0.0, galley.size().y / 2.0);
+            ui.painter().galley(pos, galley, ui.visuals().text_color());
+        });
+    }
+
     fn reset(&self) {
         self.setter.begin_set_parameter(self.param);
         self.setter
@@ -35,11 +50,17 @@ impl<'a> Fader<'a> {
 
 impl Widget for Fader<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
-        ui.horizontal(|ui| {
+        // Top-aligned, so the readout lines up with the groove rather than
+        // with the middle of groove and scale.
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
             let response = self.track(ui);
-            ui.add_sized(
-                [56.0, CAP.y],
-                egui::Label::new(self.param.to_string()).selectable(false),
+            let (rect, _) = ui.allocate_exact_size(vec2(56.0, CAP.y), Sense::hover());
+            ui.painter().text(
+                rect.left_center(),
+                Align2::LEFT_CENTER,
+                self.param.to_string(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                ui.visuals().text_color(),
             );
             response
         })
@@ -49,11 +70,10 @@ impl Widget for Fader<'_> {
 
 impl Fader<'_> {
     fn track(&self, ui: &mut Ui) -> Response {
-        let label_height = 12.0;
-        let (rect, mut response) = ui.allocate_exact_size(
-            vec2(WIDTH, CAP.y + label_height + 4.0),
-            Sense::click_and_drag(),
-        );
+        // The scale labels, plus some room before the next row.
+        let label_height = 20.0;
+        let (rect, mut response) =
+            ui.allocate_exact_size(vec2(WIDTH, CAP.y + label_height), Sense::click_and_drag());
         let x_range = (rect.left() + PAD)..=(rect.right() - PAD);
         let travel = rect.width() - 2.0 * PAD;
         let x_of = |norm: f32| egui::emath::lerp(x_range.clone(), norm);
