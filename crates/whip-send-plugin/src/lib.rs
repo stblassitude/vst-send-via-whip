@@ -12,6 +12,7 @@ use whip_core::{
 };
 
 mod editor;
+mod fader;
 pub mod standalone;
 
 pub struct WhipSend {

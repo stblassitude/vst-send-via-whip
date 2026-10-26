@@ -74,7 +74,7 @@ controllers, or set from Reaper actions and OSC:
 | Parameter | Values | Effect |
 |---|---|---|
 | **Send enabled** | on/off | Off ends the WHIP session; on starts a new one. The track's audio is unaffected either way. |
-| **Send gain** | −30 … +12 dB | Gain applied to the sent signal only. |
+| **Send gain** | −30 … +12 dB | Gain applied to the sent signal only. In the editor, Shift-drag the fader for fine control; double-click it to reset to 0 dB. |
 | **Channels** | Mono (left), Mono (right), Mono (L+R), Stereo | How the track is mapped onto the stream. On a mono track, left and right are the same. |
 
 ## Where settings are stored

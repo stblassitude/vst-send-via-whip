@@ -3,10 +3,10 @@ use std::time::{Duration, Instant};
 
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::{self, Color32, RichText};
-use nih_plug_egui::widgets::ParamSlider;
 use nih_plug_egui::{create_egui_editor, resizable_window::ResizableWindow};
 use whip_core::{ConnState, Content, Shared, Status, StreamSettings};
 
+use crate::fader::Fader;
 use crate::{Mode, WhipSendParams};
 
 struct EditorState {
@@ -220,7 +220,7 @@ fn draw(ui: &mut egui::Ui, setter: &ParamSetter, st: &mut EditorState) {
                 ui.end_row();
 
                 ui.label("Gain");
-                ui.add(ParamSlider::for_param(&p.gain, setter));
+                ui.add(Fader::new(&p.gain, setter));
                 ui.end_row();
 
                 ui.label("Channels");
